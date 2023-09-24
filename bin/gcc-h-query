@@ -1,0 +1,112 @@
+#!/bin/sh -e
+##:
+#h: Usage: gcc-h-query -C (use g++) ...
+#h:
+#h: -V                  : Show configuration.
+#h: -1 INCLUDE          : Include with <>.
+#h: -2 INCLUDE          : Include with "".
+#h: -d                  : List default defines.
+#h: -m MACRO=RESULT ... : If MACRO defined print RESULT. 
+#h: -c MACRO ...        : Return success if MACRO defined.
+#h: -s TYPE ...         : Get the size of a type.
+##:
+gcc_h_query() {
+    local OPTIND optopt compiler n pwd="$(pwd)" cmd=''
+    local code='' lang='c' 
+    
+    ## Parse command line arguments.
+    while getopts "CV1:2:dmcs" optopt; do
+        ops="${ops}${optopt}"
+        case $optopt in
+            V)       gcc_h_query_show_variables; return 0      ;;
+            1)       code="${code}#include <${OPTARG}>${NL}"   ;;
+            2)       code="${code}#include \"${OPTARG}\"${NL}" ;;
+            C)       lang='c++';;
+            d|m|c|s) cmd="${optopt}";;
+            \?)      return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+    
+    ## Select compiler.
+    case "${lang}" in
+        c)   compiler="${CC:-gcc} ${CFLAGS}"    ;;
+        c++) compiler="${CXX:-g++} ${CXXFLAGS}" ;;
+    esac
+    
+    ## Operations.
+    case "${cmd}" in
+        '')
+            echo "${compiler}"
+            ;;
+        'd')
+            ${compiler} -dM -E - < /dev/null
+            ;;
+        'm')
+            if true; then
+                echo "${code}"
+                for n in "$@"; do
+                    n1="$(echo "${n}" | sed 's|=.*||'     )"
+                    n2="$(echo "${n}" | sed 's|^[^=]*=||' )"
+                    echo "#ifdef $n1"
+                    echo "\"$n2\""
+                    echo "#endif"
+                done
+            fi | ${compiler} -E -            \
+               | sed '/^\#/d;/^ *$/d;s|"||g' \
+               | head -n 1
+            ;;
+        'c')
+            if true; then
+                for n in "$@"; do
+                    echo "#ifdef ${n}"
+                    echo "\"${n}\""
+                    echo "#endif"
+                done
+            fi | ${compiler} -E -            \
+               | sed '/^\#/d;/^ *$/d;s|"||g' \
+               | head -n 1
+            ;;
+        's')
+            if true; then
+                cat <<-EOF
+		${code}
+		#include <stdio.h>
+		int main(int _argc, char *_argv[]) {
+		EOF
+                for n in "$@"; do
+                    cat <<-EOF
+			printf("%s %li\n", "${n}",sizeof(${n}));
+			EOF
+		done
+                cat <<-EOF
+		    return 0;
+		}
+		EOF
+            fi | ${compiler} -o .cc-query.exe -x "${lang}" -
+            ${CC_EXEC:-env} ./.cc-query.exe
+            rm -f ./.cc-query.exe
+            ;;
+    esac
+    
+}
+gcc_h_query_show_variables() {
+    echo "CC       : ${CC:-gcc}"
+    echo "CXX      : ${CXX:-g++}"
+    echo "CFLAGS   : ${CFLAGS}"
+    echo "CXXFLAGS : ${CXXFLAGS}"
+    echo "CC_EXEC  : ${CC_EXEC}"
+}
+## -------------------------------------------------------------------
+
+
+
+## -------------------------------------------------------------------
+NL='
+'
+if test @"$(basename "$0")" = @"gcc-h-query";then
+    case "${1}" in
+        ''|-h|--help) sed -n 's/^ *#h: \{0,1\}//p' "$0" ;;
+        *)            gcc_h_query "$@"; exit 0;;
+    esac
+fi

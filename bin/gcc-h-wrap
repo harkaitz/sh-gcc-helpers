@@ -1,0 +1,119 @@
+#!/bin/sh -e
+##:
+#h: Usage: gcc-h-wrap ...
+#h:
+#h: ... show                  : Show configuration.
+#h: ... install [ssh MACHINE] : Install "c" and "cxx" wrappers.
+#h: ... c/cxx   ARGS...       : Execute compilers.
+##:
+gcc_h_wrap() {
+    if test ! -n "${1}"; then
+        sed -n 's/^ *#h: \{0,1\}//p' "$0"
+        return 0
+    fi
+    local cmd="$1"
+    shift
+    case "${cmd}" in
+        show)    gcc_h_wrap_show_variables ;;
+        install) gcc_h_wrap_install "$@"   ;;
+        c)       c       "$@";;
+        cxx)     cxx     "$@";;
+        *)       echo >&2 "error: Invalid argument: ${cmd}"; return 1;;
+    esac
+}
+gcc_h_wrap_show_variables() {
+    cat <<-EOF
+	CC       : ${CC}
+	CXX      : ${CXX}
+	CFLAGS   : ${CFLAGS}
+	CXXFLAGS : ${CXXFLAGS}
+	
+	ENABLE_DEBUG      : ${ENABLE_DEBUG}
+	ENABLE_PROFILING  : ${ENABLE_PROFILING}
+	ENABLE_COVERAGE   : ${ENABLE_COVERAGE}
+	DISABLE_SANITIZER : ${DISABLE_SANITIZER}
+	
+	EXTRA_ARGS       : ${EXTRA_ARGS}
+	EXTRA_ARGS_C     : ${EXTRA_ARGS_C}
+	EXTRA_ARGS_CXX   : ${EXTRA_ARGS_CXX}
+	EXTRA_ARGS_AFTER : ${EXTRA_ARGS_AFTER}
+	EOF
+}
+gcc_h_wrap_calc_variables() {
+    if test @"${CONFIG}" = @"DEBUG"; then
+        ENABLE_DEBUG=y
+    fi
+    if test -n "${ENABLE_DEBUG}${ENABLE_PROFILING}${ENABLE_COVERAGE}"; then
+        EXTRA_ARGS="${EXTRA_ARGS} -g -O0 -finstrument-functions -rdynamic"
+        EXTRA_ARGS="${EXTRA_ARGS} -fdebug-prefix-map=../=$(readlink -f ..)/"
+        EXTRA_ARGS="${EXTRA_ARGS} -fdebug-prefix-map=./=$(readlink -f .)/"
+    fi
+    if test -n "${ENABLE_PROFILING}${ENABLE_COVERAGE}"; then
+        EXTRA_ARGS="${EXTRA_ARGS} -pg"
+    fi
+    if test -n "${ENABLE_PROFILING}"; then
+        EXTRA_ARGS="${EXTRA_ARGS} -fprofile-abs-path"
+    fi
+    if test -n "${ENABLE_COVERAGE}"; then
+        EXTRA_ARGS="${EXTRA_ARGS} --coverage"
+    fi
+    if test -n "${DISABLE_WARNINGS}"; then
+        EXTRA_ARGS_C="$(echo                                          \
+        -Wno-incompatible-pointer-types  -Wno-pointer-to-int-cast     \
+        -Wno-narrowing                   -Wno-enum-compare            \
+        -Wno-unused-variable             -Wno-unknown-pragmas         \
+        -Wno-switch                      -Wno-unused-but-set-variable \
+        -Wno-comment)"
+        EXTRA_ARGS_CXX="$(echo                                    \
+        -Wno-narrowing                   -Wno-enum-compare        \
+        -Wno-return-type                 -Wno-write-strings       \
+        -Wno-parentheses                 -Wno-unused-function     \
+        -Wno-unused-label                -Wno-sign-compare        \
+        -Wno-unused-variable             -Wno-reorder             \
+        -Wno-unknown-pragmas             -Wno-format              \
+        -Wno-deprecated-declarations     -Wno-comment             \
+        -Wno-address                     -Wno-maybe-uninitialized \
+        -Wno-switch                      -Wno-sequence-point      \
+        -Wno-unused-but-set-variable)"
+    fi
+    EXTRA_ARGS_AFTER=
+    if test -n "${DISABLE_SANITIZER}"; then
+        EXTRA_ARGS_AFTER="${EXTRA_ARGS_AFTER} -fno-sanitize=all"
+    fi
+    if test ! -n "${DISABLE_PIE}"; then
+        EXTRA_ARGS_AFTER="${EXTRA_ARGS_AFTER} -fpie"
+    fi
+    if test -n "${ENABLE_DEBUG}${ENABLE_PROFILING}${ENABLE_COVERAGE}"; then
+        EXTRA_ARGS_AFTER="${EXTRA_ARGS_AFTER} -O0"
+    fi
+}
+gcc_h_wrap_install() {
+    "$@" sh -e -c '
+    cat > /tmp/a
+    echo "Creating /usr/bin/c and /usr/bin/cxx ..."
+    sudo cp /tmp/a /usr/bin/c
+    sudo cp /tmp/a /usr/bin/cxx
+    sudo chmod +x /usr/bin/cxx /usr/bin/c
+    ' < "$0"
+    # /usr/include/c++/13/bits/stl_algobase.h:2085
+}
+## -------------------------------------------------------------------
+c() {
+    ## 1.- Do not put "-x c"
+    virun ${CC:-/usr/bin/gcc} ${CFLAGS} ${EXTRA_ARGS} ${EXTRA_ARGS_C} "$@" ${EXTRA_ARGS_AFTER}
+}
+cxx() {
+    ## 1.- Do not put "-x c++"
+    virun ${CXX:-/usr/bin/g++} ${CXXFLAGS} ${EXTRA_ARGS} ${EXTRA_ARGS_CXX} "$@" ${EXTRA_ARGS_AFTER}
+}
+virun() {
+    test ! -n "${VERBOSE_COMPILER}" || echo "$*" >&2
+    "$@"
+}
+## -------------------------------------------------------------------
+gcc_h_wrap_calc_variables
+SCRNAME="$(basename "$0")"
+case "${SCRNAME}" in
+    gcc-h-wrap) gcc_h_wrap "$@"; exit 0 ;;
+    c|cxx) CC= CXX= CFLAGS= CXXFLAGS=; "${SCRNAME}" "$@"; exit 0;;
+esac

@@ -1,0 +1,49 @@
+#!/bin/sh -e
+##:
+#h: Usage: gcc-h-test-cross ...
+#h:
+#h: Test cross compilation with gcc.
+#h:
+#h:   -b     : Build example program.
+#h:   -l     : Execute program locally.
+#h:   -r SSH : Execute program in remote machine.
+#h:
+#h: Environment variables: CC,CXX,CFLAGS,CXXFLAGS
+##:
+. gcc-h-wrap
+. gcc-h-test-code
+gcc_h_test_cross() {
+    local OPTIND optopt opt_b= opt_l= opt_r=
+    
+    ## Command line arguments.
+    while getopts "blr:" optopt; do
+        case $optopt in
+            b)  opt_b=y;;
+            l)  opt_l=y;;
+            r)  opt_r="${OPTARG}";;
+            \?) return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+    
+    ## Operations.
+    if test -n "${opt_b}"; then
+        c -x c -o .a.exe - <<-EOF
+	$(gcc_h_test_code c-funcall)
+	EOF
+    fi
+    if test -n "${opt_l}"; then
+        ./.a.exe
+    fi
+    if test -n "${opt_r}"; then
+        scp ./.a.exe "${opt_r}":
+        ssh "${opt_r}" ./.a.exe
+    fi
+    rm -f ./.a.exe
+}
+if test @"$(basename "$0")" = @"gcc-h-test-cross";then
+    case "${1}" in
+        ''|-h|--help) sed -n 's/^ *#h: \{0,1\}//p' "$0" ;;
+        *)            gcc_h_test_cross "$@"; exit 0     ;;
+    esac
+fi

@@ -1,0 +1,15 @@
+#!/bin/sh -e
+#help: Execute test bench.
+. htest
+HTEST_COL1=40
+## gcc-h-query
+htest -E '1' -f 'wc -l'   'gcc-h-query -d | grep __STDC__'
+htest -R '^int  *[48]$'   'gcc-h-query -s int'
+htest -R '^int64_t  *8$'  'gcc-h-query -1 stdint.h -s int64_t'
+htest -R '^[uw]$'         'gcc-h-query -m __unix__=u _WIN32=w'
+## gcc-h-test-code
+htest -R 'main'           'gcc-h-test-code c-funcall'
+## gcc-h-test-cross
+htest -R 'After hello'    'gcc-h-test-cross -bl'
+## gcc-h-wrap
+htest                     'gcc-h-wrap show'
