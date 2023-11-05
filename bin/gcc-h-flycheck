@@ -1,0 +1,218 @@
+#!/bin/sh -e
+##:
+#h: Usage: hflycheck SOURCE-FILES...
+#h:
+#h: This program helps managing your flycheckers and code parsers.
+#h:
+#h:     -v  : Show configuration.
+#h:     -s  : Skip execution, simply show the command.
+#h:
+#h:     -lP : List prefixes.
+#h:     -lI : List includes.
+#h:     -lD : List defines in
+#h:
+#h:     -i  : Update ~/.hflycheck.sh
+#h:
+#h:     -xE : Print semantic header search code.
+#h:     -eE : Print flycheck installation code.
+#::
+hflycheck() {
+    local OPTIND optopt ops=
+    
+    ## Parse command line arguments.
+    while getopts "vslPIDixeE" optopt; do
+        ops="${ops}${optopt}"
+        case $optopt in
+            v)  hflycheck_show_variables; return 0  ;;
+            s)  export HFLYCHECK_SKIP=y             ;;
+            \?) return 1;;
+        esac
+    done
+    shift $(( $OPTIND - 1 ))
+
+    ## Create environment.
+    mkdir -p "${HFLYCHECK_DIRECTORY}"
+    touch \
+        "${HFLYCHECK_DIRECTORY}/prefix.lst" \
+        "${HFLYCHECK_DIRECTORY}/incdir.lst" \
+        "${HFLYCHECK_DIRECTORY}/defines.h"
+    
+    case "${ops}" in
+        *lP*) cat "${HFLYCHECK_DIRECTORY}/prefix.lst" ; return 0;;
+        *lI*) cat "${HFLYCHECK_DIRECTORY}/incdir.lst" ; return 0;;
+        *lD*) cat "${HFLYCHECK_DIRECTORY}/defines.h"  ; return 0;;
+    esac
+    
+    ## Install hflycheck.
+    case "${ops}" in
+        *i*) hflycheck_install;;
+    esac
+    
+    ## Emacs code.
+    case "${ops}" in
+        *xE*) hflycheck_emacs_includes; return 0;;
+        *eE*) hflycheck_emacs_flycheck; return 0;;
+    esac
+        
+    ## Check files.
+    for f in "$@";do
+        case "${f}" in
+            *.c)                                   hflycheck_check_c   "${f}" ;;
+            *.h|*.hh|*.hpp|*.hxx|*.cc|*.cpp|*.cxx) hflycheck_check_cxx "${f}" ;;
+        esac
+    done
+}
+hflycheck_show_variables() {
+    cat <<-EOF
+	HFLYCHECK_DIRECTORY : ${HFLYCHECK_DIRECTORY}
+	HFLYCHECK_LINK      : ${HFLYCHECK_LINK}
+	HFLYCHECK_SETTINGS  : ${HFLYCHECK_SETTINGS}
+	HFLYCHECK_SHELL     : ${HFLYCHECK_SHELL}
+	HFLYCHECK_CC        : ${HFLYCHECK_CC}
+	HFLYCHECK_CXX       : ${HFLYCHECK_CXX}
+	HFLYCHECK_CFLAGS    : ${HFLYCHECK_CFLAGS}
+	HFLYCHECK_CXXFLAGS  : ${HFLYCHECK_CXXFLAGS}
+	EOF
+}
+hflycheck_calc_variables() {
+    HFLYCHECK_DIRECTORY="${HFLYCHECK_DIRECTORY:-${HOME}/.hflycheck}"
+    HFLYCHECK_LINK="${HFLYCHECK_LINK:-${HOME}/.hflycheck.sh}"
+    HFLYCHECK_SETTINGS="${HFLYCHECK_SETTINGS:-${HFLYCHECK_DIRECTORY}/settings}"
+    case "$(uname -o)" in
+        Msys|MS/Windows) HFLYCHECK_SHELL='sh.exe'  HFLYCHECK_NULL="nul"      ;;
+        *)               HFLYCHECK_SHELL='/bin/sh' HFLYCHECK_NULL="/dev/null";;
+    esac
+    HFLYCHECK_CC="gcc"
+    HFLYCHECK_CXX="g++"
+    HFLYCHECK_CFLAGS="-Wall -Wpedantic -Wextra"
+    HFLYCHECK_CXXFLAGS="-Wall -Wpedantic"
+    if test -e "${HFLYCHECK_SETTINGS}"; then
+        . "${HFLYCHECK_SETTINGS}"
+    fi
+}
+## -------------------------------------------------------------------
+hflycheck_check_c() {
+    hflycheck_exec               \
+        ${HFLYCHECK_CC}          \
+        -x c                     \
+        -S                       \
+        -o "${HFLYCHECK_NULL}"   \
+        "$@"                     \
+        -DFLYCHECK               \
+        $(hflycheck_includes)
+}
+hflycheck_check_cxx() {
+    hflycheck_exec             \
+        ${HFLYCHECK_CXX}       \
+        -x c++                 \
+        -S                     \
+        -o "${HFLYCHECK_NULL}" \
+        "$@"                   \
+        -DFLYCHECK             \
+        $(hflycheck_includes)
+}
+## -------------------------------------------------------------------
+hflycheck_includes() {
+    local p d
+
+    echo -n "-include ${HFLYCHECK_DIRECTORY}/defines.h"
+    
+    test ! -d ./include     || echo " -I./include"
+    test ! -d ../include    || echo " -I../include"
+    test ! -d ../../include || echo " -I../../include"
+    
+    for p in $(cat "${HFLYCHECK_DIRECTORY}/prefix.lst"); do
+        if test -d "${p}/include"; then
+            echo -n " -isystem ${p}/include"
+        fi
+    done
+    for d in $(cat "${HFLYCHECK_DIRECTORY}/incdir.lst"); do
+        echo -n " -isystem ${d}"
+    done
+}
+## -------------------------------------------------------------------
+hflycheck_install() {
+    if ! grep -q "hflycheck" "$0"; then
+        echo >&2 "error: gcc-h-flycheck: -i not supported when sourced."
+        return 1
+    fi
+    cp -v "$0" "${HFLYCHECK_LINK}"
+    case "$(uname -o)" in
+        Msys|MS/Windows) true;;
+        *)               chmod -v +x "${HFLYCHECK_LINK}";;
+    esac
+}
+hflycheck_emacs_flycheck() {
+    
+    cat <<-EOF
+	(load-library "flycheck")
+	(flycheck-define-checker gen-flycheck-c "C checker."
+	    :command ("${HFLYCHECK_SHELL}" "-e" "${HFLYCHECK_LINK}" source-inplace)
+	    :error-patterns
+	        ((warning line-start (file-name) ":" line ":" column
+	         ": warning: " (message) line-end)
+	         (error line-start (file-name) ":" line ":" column
+	         ": error: " (message) line-end))
+	    :modes (c-mode))
+	(flycheck-define-checker gen-flycheck-cxx "C++ checker."
+	    :command ("${HFLYCHECK_SHELL}" "-e" "${HFLYCHECK_LINK}" source-inplace)
+	    :error-patterns
+	        ((warning line-start (file-name) ":" line ":" column
+	         ": warning: " (message) line-end)
+	         (error line-start (file-name) ":" line ":" column
+	         ": error: " (message) line-end))
+	    :modes (c++-mode))
+	(add-to-list 'flycheck-checkers 'gen-flycheck-c)
+	(add-to-list 'flycheck-checkers 'gen-flycheck-cxx)
+	EOF
+}
+hflycheck_emacs_includes() (
+
+    echo "(semantic-reset-system-include 'c-mode)"
+    echo "(semantic-reset-system-include 'c++-mode)"
+
+    while read -r d; do
+        if test -d "${d}"; then
+            printf '(semantic-add-system-include "%s")\n' "${d}"
+        fi
+    done < "${HFLYCHECK_DIRECTORY}/incdir.lst"
+
+    echo "(setq semantic-lex-c-preprocessor-symbol-map '("
+
+    while read -r l; do
+        var="\"$(hflycheck_optopt "${l}")\""
+        val="$(hflycheck_escape2 "$(hflycheck_optarg "${l}")")"
+        printf '\n        (%-20s . %s)' "${var}" "${val}"
+    done < "${HFLYCHECK_DIRECTORY}/defines.lst"
+
+    echo "))"
+)
+## -------------------------------------------------------------------
+hflycheck_exec() { # COMMAND...
+    if test @"${HFLYCHECK_SKIP}" = @"y";then
+        echo "$@"
+    else
+        env "$@"
+    fi
+}
+hflycheck_optopt() {
+    local s="${2:-=}"
+    echo "$1" | sed -n 's|^\(-*[^'"$s"' ][^'"$s"' ]*\).*|\1|p'
+}
+hflycheck_optarg() {
+    local s="${2:-=}"
+    echo "$1" | sed -n 's|^-*[^'"$s"'][^'"$s"']*'"$s"'||p'
+}
+hflycheck_escape2() {
+    printf '"%s"' "`echo "${arg}" | sed 's|\([\$"]\)|\\\\\\1|g'`"
+}
+## -------------------------------------------------------------------
+hflycheck_calc_variables
+case "$(basename "$0" .sh)" in
+    gcc-h-flycheck|.hflycheck)
+        case "${1}" in
+            ''|-h|--help) sed -n 's/^ *#h: \{0,1\}//p' "$0" ;;
+            *)            hflycheck "$@"; exit 0;;
+        esac
+        ;;
+esac

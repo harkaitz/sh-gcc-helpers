@@ -3,6 +3,24 @@ GCC HELPERS
 
 ## Help
 
+gcc-h-flycheck
+
+    Usage: hflycheck SOURCE-FILES...
+    
+    This program helps managing your flycheckers and code parsers.
+    
+        -v  : Show configuration.
+        -s  : Skip execution, simply show the command.
+    
+        -lP : List prefixes.
+        -lI : List includes.
+        -lD : List defines in
+    
+        -i  : Update ~/.hflycheck.sh
+    
+        -xE : Print semantic header search code.
+        -eE : Print flycheck installation code.
+
 gcc-h-query
 
     Usage: gcc-h-query -C (use g++) ...
@@ -39,9 +57,8 @@ gcc-h-wrap
 
     Usage: gcc-h-wrap ...
     
-    ... show                  : Show configuration.
-    ... install [ssh MACHINE] : Install "c" and "cxx" wrappers.
-    ... c/cxx   ARGS...       : Execute compilers.
+    ... show            : Show configuration.
+    ... c/cxx   ARGS... : Execute compilers.
 
 ## Collaborating
 
